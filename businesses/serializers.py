@@ -4,6 +4,23 @@ from businesses.models import Application, Business, Cashier, Category
 from users.models import User
 
 
+def normalize_website(value):
+    """
+    'www.biznes.uz' kabi protokolsiz manzillarni ham qabul qilish uchun.
+    Agar http(s):// bo'lmasa, https:// avtomatik qo'shiladi va domen formati tekshiriladi.
+    """
+    if not value:
+        return value
+    value = value.strip()
+    candidate = value if value.startswith(("http://", "https://")) else f"https://{value}"
+    validator = serializers.URLField()
+    try:
+        validator.run_validation(candidate)
+    except serializers.ValidationError:
+        raise serializers.ValidationError("Veb-sayt manzili noto'g'ri (masalan: www.biznes.uz).")
+    return value
+
+
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
@@ -16,12 +33,22 @@ class CategorySerializer(serializers.ModelSerializer):
 class ApplicationStep1Serializer(serializers.ModelSerializer):
     """Step 1 — Biznes."""
 
+    short_description = serializers.CharField(
+        required=False, allow_blank=True, max_length=300,
+        help_text="Faoliyatingiz haqida 1-2 jumla",
+    )
+
     class Meta:
         model = Application
         fields = [
             "id", "business_name", "category", "business_type",
             "responsible_full_name", "short_description",
         ]
+
+    def validate_category(self, value):
+        if not value.is_active:
+            raise serializers.ValidationError("Tanlangan kategoriya faol emas.")
+        return value
 
     def create(self, validated_data):
         validated_data["applicant"] = self.context["request"].user
@@ -35,6 +62,12 @@ class ApplicationStep2Serializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = ["phone_number", "email", "instagram", "telegram", "website"]
+        extra_kwargs = {
+            "phone_number": {"help_text": "+998 90 000 00 00 formatida"},
+        }
+
+    def validate_website(self, value):
+        return normalize_website(value)
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
@@ -44,14 +77,18 @@ class ApplicationStep2Serializer(serializers.ModelSerializer):
 
 
 class ApplicationStep3Serializer(serializers.ModelSerializer):
-    """Step 3 — Joylashuv."""
+    """
+    Step 3 — Joylashuv.
+    NOTE: latitude/longitude ariza beruvchi tomonidan kiritilmaydi — "Aniq lokatsiyani
+    operator siz bilan birga belgilaydi" (rasmdagi eslatma). Shuning uchun bu maydonlar
+    bu yerda yo'q; ular admin tomonidan alohida endpoint orqali belgilanadi.
+    """
 
     class Meta:
         model = Application
         fields = [
             "region", "city_district", "full_address",
             "work_days", "work_hours_from", "work_hours_to",
-            "latitude", "longitude",
         ]
 
     def update(self, instance, validated_data):
@@ -67,6 +104,17 @@ class ApplicationStep4Serializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = ["discount_percent", "min_purchase_amount", "discount_type"]
+
+    def validate(self, attrs):
+        discount_type = attrs.get("discount_type", getattr(self.instance, "discount_type", None))
+        min_purchase_amount = attrs.get(
+            "min_purchase_amount", getattr(self.instance, "min_purchase_amount", None)
+        )
+        if discount_type == Application.DiscountType.MIN_PURCHASE and not min_purchase_amount:
+            raise serializers.ValidationError(
+                {"min_purchase_amount": "'Minimal xarid summasi' turi tanlanganda bu maydon majburiy."}
+            )
+        return attrs
 
     def update(self, instance, validated_data):
         instance = super().update(instance, validated_data)
@@ -141,6 +189,16 @@ class BusinessSerializer(serializers.ModelSerializer):
 
     def get_cashiers_count(self, obj):
         return obj.cashiers.filter(is_active=True).count()
+
+    def validate_website(self, value):
+        return normalize_website(value)
+
+
+class ApplicationLocationSetSerializer(serializers.Serializer):
+    """Admin/operator: ariza uchun aniq lokatsiyani belgilash (Step 3 eslatmasiga mos)."""
+
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7)
 
 
 class BusinessDashboardSerializer(serializers.Serializer):

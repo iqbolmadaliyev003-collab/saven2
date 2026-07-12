@@ -1,7 +1,13 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
+
+uzbek_phone_validator = RegexValidator(
+    regex=r"^\+998\d{9}$",
+    message="Telefon raqami +998XXXXXXXXX formatida bo'lishi kerak (masalan: +998900000000).",
+)
 
 
 class Category(models.Model):
@@ -29,6 +35,25 @@ class WorkDay(models.TextChoices):
     MON_FRI = "mon_fri", "Dushanba - Juma"
     MON_SAT = "mon_sat", "Dushanba - Shanba"
     EVERYDAY = "everyday", "Har kuni"
+
+
+class Region(models.TextChoices):
+    """Wizard Step 3 — Viloyat * (dropdown). O'zbekiston hududlari."""
+
+    TASHKENT_CITY = "tashkent_city", "Toshkent shahar"
+    TASHKENT_REGION = "tashkent_region", "Toshkent viloyati"
+    ANDIJAN = "andijan", "Andijon"
+    BUKHARA = "bukhara", "Buxoro"
+    FERGANA = "fergana", "Farg'ona"
+    JIZZAKH = "jizzakh", "Jizzax"
+    KASHKADARYA = "kashkadarya", "Qashqadaryo"
+    NAVOIY = "navoiy", "Navoiy"
+    NAMANGAN = "namangan", "Namangan"
+    SAMARKAND = "samarkand", "Samarqand"
+    SURKHANDARYA = "surkhandarya", "Surxondaryo"
+    SIRDARYO = "sirdaryo", "Sirdaryo"
+    KHOREZM = "khorezm", "Xorazm"
+    KARAKALPAKSTAN = "karakalpakstan", "Qoraqalpog'iston"
 
 
 class Application(models.Model):
@@ -61,24 +86,32 @@ class Application(models.Model):
     short_description = models.TextField(blank=True)
 
     # --- Step 2: Kontakt ---
-    phone_number = models.CharField(max_length=20)
+    phone_number = models.CharField(max_length=13, validators=[uzbek_phone_validator])
     email = models.EmailField(blank=True)
     instagram = models.CharField(max_length=150, blank=True)
     telegram = models.CharField(max_length=150, blank=True)
-    website = models.URLField(blank=True)
+    website = models.CharField(max_length=255, blank=True)  # protokolsiz ham qabul qilinadi (www.biznes.uz)
 
     # --- Step 3: Joylashuv ---
-    region = models.CharField(max_length=120)
+    region = models.CharField(max_length=30, choices=Region.choices)
     city_district = models.CharField(max_length=120)
     full_address = models.CharField(max_length=500)
     work_days = models.CharField(max_length=20, choices=WorkDay.choices, default=WorkDay.EVERYDAY)
     work_hours_from = models.TimeField(blank=True, null=True)
     work_hours_to = models.TimeField(blank=True, null=True)
+    # Aniq lokatsiya (lat/long) ariza beruvchi tomonidan emas, balki
+    # operator/admin tomonidan tasdiqlash bosqichida belgilanadi (rasmdagi eslatmaga mos).
     latitude = models.DecimalField(max_digits=10, decimal_places=7, blank=True, null=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, blank=True, null=True)
 
     # --- Step 4: Chegirma ---
-    discount_percent = models.PositiveSmallIntegerField(default=10)
+    discount_percent = models.PositiveSmallIntegerField(
+        default=10,
+        validators=[
+            MinValueValidator(5, message="Chegirma foizi kamida 5%% bo'lishi kerak."),
+            MaxValueValidator(100, message="Chegirma foizi 100%% dan oshmasligi kerak."),
+        ],
+    )
     min_purchase_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     discount_type = models.CharField(max_length=20, choices=DiscountType.choices, default=DiscountType.FIXED)
 
@@ -127,13 +160,13 @@ class Business(models.Model):
     description = models.TextField(blank=True)
     logo = models.ImageField(upload_to="business_logos/", blank=True, null=True)
 
-    phone_number = models.CharField(max_length=20)
+    phone_number = models.CharField(max_length=13, validators=[uzbek_phone_validator])
     email = models.EmailField(blank=True)
     instagram = models.CharField(max_length=150, blank=True)
     telegram = models.CharField(max_length=150, blank=True)
-    website = models.URLField(blank=True)
+    website = models.CharField(max_length=255, blank=True)
 
-    region = models.CharField(max_length=120)
+    region = models.CharField(max_length=30, choices=Region.choices)
     city_district = models.CharField(max_length=120)
     full_address = models.CharField(max_length=500)
     latitude = models.DecimalField(max_digits=10, decimal_places=7, blank=True, null=True)

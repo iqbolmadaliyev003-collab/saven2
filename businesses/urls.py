@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from businesses.views import (
     AdminApplicationReviewView,
+    AdminApplicationSetLocationView,
     AdminApplicationViewSet,
     AdminBusinessStatsView,
     AdminBusinessStopPartnershipView,
@@ -32,6 +33,7 @@ urlpatterns = [
 
     # ---- Admin: ariza va biznes boshqaruvi ----
     path("admin/applications/<uuid:pk>/review/", AdminApplicationReviewView.as_view(), name="admin-application-review"),
+    path("admin/applications/<uuid:pk>/set-location/", AdminApplicationSetLocationView.as_view(), name="admin-application-set-location"),
     path("admin/businesses/<uuid:pk>/stop-partnership/", AdminBusinessStopPartnershipView.as_view(), name="admin-business-stop"),
     path("admin/businesses/<uuid:pk>/stats/", AdminBusinessStatsView.as_view(), name="admin-business-stats"),
 

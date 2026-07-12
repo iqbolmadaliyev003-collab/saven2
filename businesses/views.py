@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from businesses.models import Application, Business, Cashier, Category
 from businesses.serializers import (
+    ApplicationLocationSetSerializer,
     ApplicationReviewSerializer,
     ApplicationSerializer,
     ApplicationStep1Serializer,
@@ -158,6 +159,24 @@ class AdminApplicationReviewView(APIView):
             application.rejection_reason = serializer.validated_data.get("rejection_reason", "")
             application.save()
             return Response(ApplicationSerializer(application).data)
+
+
+class AdminApplicationSetLocationView(APIView):
+    """
+    Operator ariza beruvchi bilan birga aniq lokatsiyani (lat/long) belgilaydi
+    (Wizard Step 3 dagi: "Aniq lokatsiyani operator siz bilan birga belgilaydi").
+    """
+
+    permission_classes = [IsAdminRole]
+
+    def post(self, request, pk):
+        application = get_object_or_404(Application, pk=pk)
+        serializer = ApplicationLocationSetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        application.latitude = serializer.validated_data["latitude"]
+        application.longitude = serializer.validated_data["longitude"]
+        application.save(update_fields=["latitude", "longitude"])
+        return Response(ApplicationSerializer(application).data)
 
 
 class AdminBusinessViewSet(viewsets.ReadOnlyModelViewSet):
