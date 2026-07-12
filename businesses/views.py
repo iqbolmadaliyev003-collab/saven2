@@ -63,8 +63,8 @@ class ApplicationWizardStep1View(generics.CreateAPIView):
     """1/4 qadam — Biznes. Yangi ariza yaratadi (draft)."""
 
     serializer_class = ApplicationStep1Serializer
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [] 
+    permission_classes = [AllowAny]
+
 
 class ApplicationWizardStepUpdateView(APIView):
     """2/4, 3/4, 4/4 qadamlarni to'ldirish uchun umumiy view."""

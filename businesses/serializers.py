@@ -12,12 +12,16 @@ def normalize_website(value):
     if not value:
         return value
     value = value.strip()
-    candidate = value if value.startswith(("http://", "https://")) else f"https://{value}"
+    candidate = (
+        value if value.startswith(("http://", "https://")) else f"https://{value}"
+    )
     validator = serializers.URLField()
     try:
         validator.run_validation(candidate)
     except serializers.ValidationError:
-        raise serializers.ValidationError("Veb-sayt manzili noto'g'ri (masalan: www.biznes.uz).")
+        raise serializers.ValidationError(
+            "Veb-sayt manzili noto'g'ri (masalan: www.biznes.uz)."
+        )
     return value
 
 
@@ -34,15 +38,21 @@ class ApplicationStep1Serializer(serializers.ModelSerializer):
     """Step 1 — Biznes."""
 
     short_description = serializers.CharField(
-        required=False, allow_blank=True, max_length=300,
+        required=False,
+        allow_blank=True,
+        max_length=300,
         help_text="Faoliyatingiz haqida 1-2 jumla",
     )
 
     class Meta:
         model = Application
         fields = [
-            "id", "business_name", "category", "business_type",
-            "responsible_full_name", "short_description",
+            "id",
+            "business_name",
+            "category",
+            "business_type",
+            "responsible_full_name",
+            "short_description",
         ]
 
     def validate_category(self, value):
@@ -51,7 +61,10 @@ class ApplicationStep1Serializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data["applicant"] = self.context["request"].user
+        request_user = self.context["request"].user
+        validated_data["applicant"] = (
+            request_user if request_user.is_authenticated else None
+        )
         validated_data["current_step"] = 2
         return super().create(validated_data)
 
@@ -87,8 +100,12 @@ class ApplicationStep3Serializer(serializers.ModelSerializer):
     class Meta:
         model = Application
         fields = [
-            "region", "city_district", "full_address",
-            "work_days", "work_hours_from", "work_hours_to",
+            "region",
+            "city_district",
+            "full_address",
+            "work_days",
+            "work_hours_from",
+            "work_hours_to",
         ]
 
     def update(self, instance, validated_data):
@@ -106,13 +123,20 @@ class ApplicationStep4Serializer(serializers.ModelSerializer):
         fields = ["discount_percent", "min_purchase_amount", "discount_type"]
 
     def validate(self, attrs):
-        discount_type = attrs.get("discount_type", getattr(self.instance, "discount_type", None))
+        discount_type = attrs.get(
+            "discount_type", getattr(self.instance, "discount_type", None)
+        )
         min_purchase_amount = attrs.get(
             "min_purchase_amount", getattr(self.instance, "min_purchase_amount", None)
         )
-        if discount_type == Application.DiscountType.MIN_PURCHASE and not min_purchase_amount:
+        if (
+            discount_type == Application.DiscountType.MIN_PURCHASE
+            and not min_purchase_amount
+        ):
             raise serializers.ValidationError(
-                {"min_purchase_amount": "'Minimal xarid summasi' turi tanlanganda bu maydon majburiy."}
+                {
+                    "min_purchase_amount": "'Minimal xarid summasi' turi tanlanganda bu maydon majburiy."
+                }
             )
         return attrs
 
@@ -133,8 +157,14 @@ class ApplicationSerializer(serializers.ModelSerializer):
         model = Application
         fields = "__all__"
         read_only_fields = [
-            "id", "applicant", "status", "reviewed_by", "reviewed_at",
-            "created_at", "updated_at", "current_step",
+            "id",
+            "applicant",
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+            "current_step",
         ]
 
 
@@ -171,19 +201,42 @@ class CashierCreateSerializer(serializers.Serializer):
 class BusinessSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
-        source="category", queryset=Category.objects.all(), write_only=True, required=False
+        source="category",
+        queryset=Category.objects.all(),
+        write_only=True,
+        required=False,
     )
     cashiers_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
         fields = [
-            "id", "owner", "application", "name", "category", "category_id",
-            "business_type", "description", "logo",
-            "phone_number", "email", "instagram", "telegram", "website",
-            "region", "city_district", "full_address", "latitude", "longitude",
-            "partnership_status", "contract_signed", "qr_code",
-            "is_active", "cashiers_count", "created_at", "updated_at",
+            "id",
+            "owner",
+            "application",
+            "name",
+            "category",
+            "category_id",
+            "business_type",
+            "description",
+            "logo",
+            "phone_number",
+            "email",
+            "instagram",
+            "telegram",
+            "website",
+            "region",
+            "city_district",
+            "full_address",
+            "latitude",
+            "longitude",
+            "partnership_status",
+            "contract_signed",
+            "qr_code",
+            "is_active",
+            "cashiers_count",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = ["id", "owner", "application", "created_at", "updated_at"]
 
@@ -214,4 +267,6 @@ class BusinessDashboardSerializer(serializers.Serializer):
 class PartnershipStatusUpdateSerializer(serializers.Serializer):
     """Hamkorlikni to'xtatish."""
 
-    partnership_status = serializers.ChoiceField(choices=Business.PartnershipStatus.choices)
+    partnership_status = serializers.ChoiceField(
+        choices=Business.PartnershipStatus.choices
+    )
