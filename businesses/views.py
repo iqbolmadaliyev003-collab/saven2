@@ -64,12 +64,14 @@ class ApplicationWizardStep1View(generics.CreateAPIView):
 
     serializer_class = ApplicationStep1Serializer
     permission_classes = [IsAuthenticated]
-
+    authentication_classes = [] 
 
 class ApplicationWizardStepUpdateView(APIView):
     """2/4, 3/4, 4/4 qadamlarni to'ldirish uchun umumiy view."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+
+    authentication_classes = []
 
     step_serializers = {
         2: ApplicationStep2Serializer,
@@ -83,7 +85,9 @@ class ApplicationWizardStepUpdateView(APIView):
         if not serializer_class:
             return Response({"detail": "Noto'g'ri qadam."}, status=400)
 
-        application = get_object_or_404(Application, pk=pk, applicant=request.user)
+        application = get_object_or_404(
+            Application, pk=pk
+        )  # applicant=request.user olib tashlandi
         serializer = serializer_class(application, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -100,7 +104,11 @@ class AdminApplicationViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Application.objects.select_related("category", "applicant").all()
     serializer_class = ApplicationSerializer
     permission_classes = [IsAdminRole]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = ["status", "category", "business_type"]
     search_fields = ["business_name", "applicant__email", "phone_number"]
     ordering_fields = ["created_at"]
@@ -156,7 +164,9 @@ class AdminApplicationReviewView(APIView):
 
         else:
             application.status = Application.Status.REJECTED
-            application.rejection_reason = serializer.validated_data.get("rejection_reason", "")
+            application.rejection_reason = serializer.validated_data.get(
+                "rejection_reason", ""
+            )
             application.save()
             return Response(ApplicationSerializer(application).data)
 
@@ -185,7 +195,11 @@ class AdminBusinessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Business.objects.select_related("category", "owner").all()
     serializer_class = BusinessSerializer
     permission_classes = [IsAdminRole]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = ["partnership_status", "category", "is_active"]
     search_fields = ["name", "owner__email", "phone_number"]
 
@@ -216,7 +230,8 @@ class AdminBusinessStatsView(APIView):
         usages = DiscountUsage.objects.filter(business=business)
         data = {
             "total_customers": usages.values("customer").distinct().count(),
-            "total_discount_amount": usages.aggregate(s=Sum("discount_amount"))["s"] or 0,
+            "total_discount_amount": usages.aggregate(s=Sum("discount_amount"))["s"]
+            or 0,
             "total_transactions": usages.count(),
         }
         return Response(data)
@@ -243,14 +258,24 @@ class MyBusinessDashboardView(APIView):
     def get(self, request):
         business = get_object_or_404(Business, owner=request.user)
         today = timezone.localdate()
-        today_usages = DiscountUsage.objects.filter(business=business, used_at__date=today)
+        today_usages = DiscountUsage.objects.filter(
+            business=business, used_at__date=today
+        )
 
         data = {
             "today_customers": today_usages.values("customer").distinct().count(),
-            "today_discount_amount": today_usages.aggregate(s=Sum("discount_amount"))["s"] or 0,
+            "today_discount_amount": today_usages.aggregate(s=Sum("discount_amount"))[
+                "s"
+            ]
+            or 0,
             "today_revenue": today_usages.aggregate(s=Sum("purchase_amount"))["s"] or 0,
-            "total_customers": DiscountUsage.objects.filter(business=business).values("customer").distinct().count(),
-            "active_discount_percent": business.application.discount_percent if business.application else 0,
+            "total_customers": DiscountUsage.objects.filter(business=business)
+            .values("customer")
+            .distinct()
+            .count(),
+            "active_discount_percent": (
+                business.application.discount_percent if business.application else 0
+            ),
         }
         serializer = BusinessDashboardSerializer(data)
         return Response(serializer.data)
