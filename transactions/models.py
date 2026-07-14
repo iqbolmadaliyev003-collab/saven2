@@ -240,4 +240,4 @@ class DailyTransactionStat(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.business.business_name} - {self.date}"
+        return f"{self.business.name} - {self.date}"

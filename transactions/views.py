@@ -20,24 +20,29 @@ from .serializers import (
     TransactionSummarySerializer,
     TransactionExportSerializer
 )
-from discounts.models import Discount
+from businesses.models import Business, Cashier
+
+
+def get_user_business(user):
+    """✅ FIX: User modelida `.business` maydoni umuman yo'q — avvalgi kod
+    `user.business` deb yozib har doim AttributeError chiqarardi (bu esa
+    aynan kassir/biznes-egasi uchun eng asosiy funksiya — tranzaksiya
+    yaratish/ko'rish — ishlamasligiga sabab bo'lardi).
+    Haqiqiy bog'lanish: Business.owner (biznes egasi uchun) va
+    Cashier.user -> Cashier.business (kassir uchun).
+    """
+    if user.role == 'business_owner':
+        return Business.objects.filter(owner=user).first()
+    if user.role == 'cashier':
+        cashier = Cashier.objects.filter(user=user, is_active=True).first()
+        return cashier.business if cashier else None
+    return None
 
 
 class TransactionPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'page_size'
     max_page_size = 1000
-
-
-class BusinessOwnerPermission:
-    """Business owner uchun permission tekshirish"""
-    def check_business_access(self, request, business_id=None):
-        if request.user.role not in ['business_owner', 'admin', 'superadmin']:
-            raise PermissionDenied("Sizda bu amal uchun ruxsat yo'q")
-        
-        if request.user.role == 'business_owner' and business_id:
-            if request.user.business.id != business_id:
-                raise PermissionDenied("Siz boshqa biznesga kirish huquqiga ega emassiz")
 
 
 class TransactionViewSet(viewsets.ModelViewSet):
@@ -58,12 +63,14 @@ class TransactionViewSet(viewsets.ModelViewSet):
         if user.role == 'admin' or user.role == 'superadmin':
             # Adminlar barchani ko'radi
             queryset = Transaction.objects.all()
-        elif user.role == 'business_owner':
-            # Biznes egasi o'z biznesini ko'radi
-            queryset = Transaction.objects.filter(business=user.business)
-        elif user.role == 'cashier':
-            # Kassir o'zining biznesini va o'z tranzaksiyalarini ko'radi
-            queryset = Transaction.objects.filter(business=user.business)
+        elif user.role in ('business_owner', 'cashier'):
+            # Biznes egasi/kassir faqat o'z biznesiga tegishlisini ko'radi
+            business = get_user_business(user)
+            queryset = (
+                Transaction.objects.filter(business=business)
+                if business
+                else Transaction.objects.none()
+            )
         else:
             queryset = Transaction.objects.none()
         
@@ -95,8 +102,13 @@ class TransactionViewSet(viewsets.ModelViewSet):
         
         # Kassir o'z biznesiga tranzaksiya qo'shadi
         if user.role == 'cashier':
+            business = get_user_business(user)
+            if not business:
+                raise PermissionDenied(
+                    "Sizga hech qanday biznes biriktirilmagan yoki kassir profilingiz faol emas"
+                )
             serializer.save(
-                business=user.business,
+                business=business,
                 cashier=user,
                 status='completed'
             )
@@ -341,15 +353,18 @@ class DailyStatViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin' or user.role == 'superadmin':
             return DailyTransactionStat.objects.all()
         elif user.role == 'business_owner':
-            return DailyTransactionStat.objects.filter(business=user.business)
+            business = get_user_business(user)
+            return (
+                DailyTransactionStat.objects.filter(business=business)
+                if business
+                else DailyTransactionStat.objects.none()
+            )
         else:
             return DailyTransactionStat.objects.none()
     
     @action(detail=False, methods=['get'])
     def generate(self, request):
         """Kunlik statistikani hisoblash (cron uchun)"""
-        from django.core.management import call_command
-        
         if request.user.role not in ['admin', 'superadmin']:
             raise PermissionDenied("Faqat admin")
         

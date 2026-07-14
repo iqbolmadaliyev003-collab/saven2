@@ -79,7 +79,7 @@ class Command(BaseCommand):
                 action = 'Yaratildi' if created else 'Yangilandi'
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f'✓ {action}: {business.business_name} - {target_date} '
+                        f'✓ {action}: {business.name} - {target_date} '
                         f'({stats["total"] or 0} tranzaksiya, {stats["total_final"] or 0} UZS)'
                     )
                 )

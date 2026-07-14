@@ -21,7 +21,6 @@ from payments.serializers import (
 )
 from users.permissions import IsAdminRole
 
-
 # ==================== FOYDALANUVCHI: to'lovlar ====================
 
 
@@ -39,7 +38,9 @@ class PaymentRetryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        original = get_object_or_404(Payment, pk=pk, user=request.user, status=Payment.Status.FAILED)
+        original = get_object_or_404(
+            Payment, pk=pk, user=request.user, status=Payment.Status.FAILED
+        )
         new_payment = Payment.objects.create(
             user=request.user,
             amount=original.amount,
@@ -49,7 +50,9 @@ class PaymentRetryView(APIView):
             original_payment=original,
         )
         # NOTE: bu yerda haqiqiy to'lov provayder (Click/Payme/Uzum) integratsiyasi chaqiriladi
-        return Response(PaymentSerializer(new_payment).data, status=status.HTTP_201_CREATED)
+        return Response(
+            PaymentSerializer(new_payment).data, status=status.HTTP_201_CREATED
+        )
 
 
 class RefundRequestCreateView(APIView):
@@ -58,13 +61,19 @@ class RefundRequestCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        payment = get_object_or_404(Payment, pk=pk, user=request.user, status=Payment.Status.SUCCESS)
+        payment = get_object_or_404(
+            Payment, pk=pk, user=request.user, status=Payment.Status.SUCCESS
+        )
         serializer = RefundRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         refund = RefundRequest.objects.create(
-            payment=payment, requested_by=request.user, reason=serializer.validated_data.get("reason", "")
+            payment=payment,
+            requested_by=request.user,
+            reason=serializer.validated_data.get("reason", ""),
         )
-        return Response(RefundRequestSerializer(refund).data, status=status.HTTP_201_CREATED)
+        return Response(
+            RefundRequestSerializer(refund).data, status=status.HTTP_201_CREATED
+        )
 
 
 # ==================== ADMIN: To'lovlar boshqaruvi ====================
@@ -76,7 +85,11 @@ class AdminPaymentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Payment.objects.select_related("user").all()
     serializer_class = PaymentSerializer
     permission_classes = [IsAdminRole]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = ["status", "provider"]
     search_fields = ["user__email", "provider_transaction_id"]
     ordering_fields = ["created_at", "amount"]
@@ -96,34 +109,37 @@ class AdminMonthlyRevenueView(APIView):
     """Oylik daromad ko'rish."""
 
     permission_classes = [IsAdminRole]
+    from itertools import chain
 
-    def get(self, request):
-        qs = (
-            Payment.objects.filter(status=Payment.Status.SUCCESS)
-            .annotate(month=TruncMonth("created_at"))
-            .values("month")
-            .annotate(total_revenue=Sum("amount"), successful_count=Count("id"))
-            .order_by("-month")
-        )
-        failed_qs = {
-            row["month"]: row["failed_count"]
-            for row in Payment.objects.filter(status=Payment.Status.FAILED)
-            .annotate(month=TruncMonth("created_at"))
-            .values("month")
-            .annotate(failed_count=Count("id"))
+
+def get(self, request):
+    revenue_qs = (
+        Payment.objects.filter(status=Payment.Status.SUCCESS)
+        .annotate(month=TruncMonth("created_at"))
+        .values("month")
+        .annotate(total_revenue=Sum("amount"), successful_count=Count("id"))
+    )
+    failed_agg = (
+        Payment.objects.filter(status=Payment.Status.FAILED)
+        .annotate(month=TruncMonth("created_at"))
+        .values("month")
+        .annotate(failed_count=Count("id"))
+    )
+    revenue_map = {row["month"]: row for row in revenue_qs}
+    failed_map = {row["month"]: row["failed_count"] for row in failed_agg}
+
+    all_months = sorted(set(revenue_map) | set(failed_map), reverse=True)
+    data = [
+        {
+            "month": month.strftime("%Y-%m"),
+            "total_revenue": revenue_map.get(month, {}).get("total_revenue") or 0,
+            "successful_count": revenue_map.get(month, {}).get("successful_count") or 0,
+            "failed_count": failed_map.get(month, 0),
         }
-
-        data = [
-            {
-                "month": row["month"].strftime("%Y-%m"),
-                "total_revenue": row["total_revenue"] or 0,
-                "successful_count": row["successful_count"],
-                "failed_count": failed_qs.get(row["month"], 0),
-            }
-            for row in qs
-        ]
-        serializer = MonthlyRevenueSerializer(data, many=True)
-        return Response(serializer.data)
+        for month in all_months
+    ]
+    serializer = MonthlyRevenueSerializer(data, many=True)
+    return Response(serializer.data)
 
 
 class AdminPaymentExportView(APIView):
@@ -148,7 +164,15 @@ class AdminPaymentExportView(APIView):
         writer = csv.writer(response)
         writer.writerow(["Foydalanuvchi", "Summa", "Provayder", "Holat", "Sana"])
         for p in qs:
-            writer.writerow([p.user.email, p.amount, p.provider, p.status, p.created_at.strftime("%Y-%m-%d %H:%M")])
+            writer.writerow(
+                [
+                    p.user.email,
+                    p.amount,
+                    p.provider,
+                    p.status,
+                    p.created_at.strftime("%Y-%m-%d %H:%M"),
+                ]
+            )
         return response
 
 
@@ -157,11 +181,15 @@ class AdminRefundReviewView(APIView):
 
     permission_classes = [IsAdminRole]
 
-    def post(self, request, pk):
-        refund = get_object_or_404(RefundRequest, pk=pk)
-        serializer = RefundReviewSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    from django.db import transaction
 
+
+def post(self, request, pk):
+    refund = get_object_or_404(RefundRequest, pk=pk)
+    serializer = RefundReviewSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    with transaction.atomic():
         refund.reviewed_by = request.user
         refund.reviewed_at = timezone.now()
 
@@ -173,7 +201,8 @@ class AdminRefundReviewView(APIView):
             refund.status = RefundRequest.Status.REJECTED
 
         refund.save()
-        return Response(RefundRequestSerializer(refund).data)
+
+    return Response(RefundRequestSerializer(refund).data)
 
 
 class AdminRefundListView(generics.ListAPIView):

@@ -90,13 +90,26 @@ class TransactionCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = [
+            'id',
             'customer_name',
             'customer_phone',
             'service_name',
             'service_category',
             'base_price',
             'discount_percent',
+            'discount_amount',
+            'final_price',
+            'status',
+            'created_at',
             'notes'
+        ]
+        # ✅ FIX: avval bu maydonlar hech qayerda e'lon qilinmagani uchun
+        # ModelSerializer ularni umuman qabul qilmas/qaytarmas edi — kassir
+        # tranzaksiya yaratganda javobda ID, hisoblangan summa va status
+        # kelmay, front-end "Muvaffaqiyatli" ekranini yoki keyingi
+        # cancel/refund amalini amalga oshira olmasdi.
+        read_only_fields = [
+            'id', 'discount_amount', 'final_price', 'status', 'created_at',
         ]
     
     def validate_base_price(self, value):

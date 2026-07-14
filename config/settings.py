@@ -2,16 +2,25 @@
 Django settings for config project.
 """
 
+import os
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-CHANGE-ME-IN-PRODUCTION-kjv*b7nbpu5%!hi66'
+# ✅ FIX: SECRET_KEY/DEBUG/ALLOWED_HOSTS/CORS avval doim hardcode va
+# xavfli standart bilan (DEBUG=True, ALLOWED_HOSTS=["*"], barcha originlarga
+# CORS ruxsati) ishlatilardi — bu production'ga chiqarilganda xavfsizlik
+# muammosi bo'lardi. Endi ENV orqali sozlanadi, standart qiymatlar esa
+# lokal devda avvalgidek ishlashni ta'minlaydi.
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "django-insecure-CHANGE-ME-IN-PRODUCTION-kjv*b7nbpu5%!hi66",
+)
 
-DEBUG = True
+DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
 
 # Application definition
@@ -37,6 +46,7 @@ INSTALLED_APPS = [
     'payments',
     'notifications',
     'analytics',
+    "transactions"
 ]
 
 MIDDLEWARE = [
@@ -125,4 +135,10 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o
+]
+# ✅ FIX: avval CORS_ALLOW_ALL_ORIGINS doim True edi (production'da ham
+# istalgan sayt API'ga so'rov yubora olardi). Endi faqat DEBUG=True
+# bo'lganda (lokal dev) barcha originlarga ruxsat beriladi.
+CORS_ALLOW_ALL_ORIGINS = DEBUG

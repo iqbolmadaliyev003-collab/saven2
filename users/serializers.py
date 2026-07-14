@@ -66,6 +66,16 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "role"]
 
 
+class UserBasicSerializer(serializers.ModelSerializer):
+    """Boshqa app'lar (masalan transactions) ichida nested/qisqa ko'rinishda
+    foydalanuvchini ko'rsatish uchun — to'liq UserSerializer'dagi membership,
+    faollik kabi og'ir maydonlarsiz."""
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "phone_number", "role"]
+
+
 class AdminUserListSerializer(serializers.ModelSerializer):
     """Admin panel: Ro'yxatni ko'rish (filter, qidirish)."""
 
