@@ -1,9 +1,19 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 
+
+def health(request):
+    """Render health-check va deploy tekshiruvi uchun engil endpoint."""
+    return JsonResponse({"status": "ok", "service": "saven-backend"})
+
+
 urlpatterns = [
+    path('', health, name='root-health'),
+    path('api/v1/health/', health, name='health'),
+
     path('django-admin/', admin.site.urls),
 
     path('api/v1/', include('users.urls')),

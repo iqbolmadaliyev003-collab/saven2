@@ -225,6 +225,30 @@ class Business(models.Model):
         return self.name
 
 
+class Service(models.Model):
+    """Biznes xizmatlari katalogi (narxi bilan).
+
+    Kassir tranzaksiya yaratishda shu ro'yxatdan xizmat tanlaydi;
+    biznes egasi ro'yxatni o'zi boshqaradi.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    business = models.ForeignKey(
+        Business, on_delete=models.CASCADE, related_name="services"
+    )
+    name = models.CharField(max_length=200)
+    price = models.DecimalField(max_digits=12, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        unique_together = ("business", "name")
+
+    def __str__(self):
+        return f"{self.name} ({self.business.name})"
+
+
 class Cashier(models.Model):
     """Biznes egasi qo'shgan kassirlar ro'yxati."""
 

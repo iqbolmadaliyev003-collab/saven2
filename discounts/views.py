@@ -1,27 +1,47 @@
 import csv
+import uuid
+from decimal import Decimal
 
 from django.db.models import Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from businesses.models import Business, Cashier
+from businesses.models import Application, Business, Cashier
 from discounts.models import DiscountChangeRequest, DiscountUsage
 from discounts.serializers import (
+    CashierDashboardSerializer,
     DiscountChangeRequestCreateSerializer,
     DiscountChangeRequestSerializer,
     DiscountChangeReviewSerializer,
     DiscountStatSerializer,
     DiscountUsageCreateSerializer,
     DiscountUsageSerializer,
+    QrScanSerializer,
 )
+from notifications.models import UserNotification
 from users.models import User
 from users.permissions import IsAdminRole, IsBusinessOwner, IsCashier
+
+
+def filter_by_date_range(queryset, request, field="used_at"):
+    """
+    ?date_from=YYYY-MM-DD va ?date_to=YYYY-MM-DD parametrlari bo'yicha filtrlash.
+    Noto'g'ri formatdagi qiymatlar (500 xato bermasligi uchun) e'tiborsiz qoldiriladi.
+    """
+    date_from = parse_date(request.query_params.get("date_from") or "")
+    date_to = parse_date(request.query_params.get("date_to") or "")
+    if date_from:
+        queryset = queryset.filter(**{f"{field}__date__gte": date_from})
+    if date_to:
+        queryset = queryset.filter(**{f"{field}__date__lte": date_to})
+    return queryset
 
 
 # ==================== BIZNES EGASI: Chegirmalar ====================
@@ -56,6 +76,16 @@ class DiscountChangeRequestCreateView(APIView):
         serializer = DiscountChangeRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        # Bir vaqtda faqat bitta ko'rib chiqilayotgan so'rov bo'lishi mumkin
+        # (frontend ham shu qoidaga tayanadi: pending_request bo'lsa tugma bloklanadi).
+        if DiscountChangeRequest.objects.filter(
+            business=business, status=DiscountChangeRequest.Status.PENDING
+        ).exists():
+            return Response(
+                {"detail": "Sizda allaqachon ko'rib chiqilayotgan so'rov mavjud."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         old_percent = business.application.discount_percent if business.application else 0
         change_request = DiscountChangeRequest.objects.create(
             business=business,
@@ -72,12 +102,21 @@ class DiscountHistoryView(generics.ListAPIView):
 
     serializer_class = DiscountUsageSerializer
     permission_classes = [IsAuthenticated, IsBusinessOwner]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filter_backends = [filters.OrderingFilter]
     ordering_fields = ["used_at"]
+    # Frontend (Asosiy, Statistika, Chegirma tarixi sahifalari) to'liq ro'yxatni
+    # olib, hisob-kitob va sahifalashni o'zi qiladi — shu sabab bu endpoint
+    # sahifalanmaydi. Aks holda 20 tadan ortiq yozuvda statistika noto'g'ri chiqadi.
+    pagination_class = None
 
     def get_queryset(self):
         business = get_object_or_404(Business, owner=self.request.user)
-        return DiscountUsage.objects.filter(business=business)
+        queryset = DiscountUsage.objects.filter(business=business).select_related(
+            "customer", "cashier"
+        )
+        # Avval date_from/date_to parametrlar qabul qilinmasdi (filterset yo'q edi),
+        # frontend esa aynan shu filtrga tayanadi.
+        return filter_by_date_range(queryset, self.request)
 
 
 class DiscountHistoryExportView(APIView):
@@ -87,14 +126,12 @@ class DiscountHistoryExportView(APIView):
 
     def get(self, request):
         business = get_object_or_404(Business, owner=request.user)
-        qs = DiscountUsage.objects.filter(business=business)
-
-        date_from = request.query_params.get("date_from")
-        date_to = request.query_params.get("date_to")
-        if date_from:
-            qs = qs.filter(used_at__date__gte=date_from)
-        if date_to:
-            qs = qs.filter(used_at__date__lte=date_to)
+        qs = filter_by_date_range(
+            DiscountUsage.objects.filter(business=business).select_related(
+                "customer", "cashier"
+            ),
+            request,
+        )
 
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = f'attachment; filename="chegirma_tarixi_{business.id}.csv"'
@@ -134,7 +171,16 @@ class DiscountStatisticsView(APIView):
         return Response(DiscountStatSerializer(data).data)
 
 
-# ==================== KASSIR: chegirma qo'llash ====================
+# ==================== KASSIR PANELI ====================
+
+
+def get_active_cashier_or_404(user):
+    """So'rov yuborgan foydalanuvchining faol kassir profili."""
+    return get_object_or_404(
+        Cashier.objects.select_related("business", "business__application"),
+        user=user,
+        is_active=True,
+    )
 
 
 class CashierApplyDiscountView(APIView):
@@ -143,21 +189,50 @@ class CashierApplyDiscountView(APIView):
     permission_classes = [IsAuthenticated, IsCashier]
 
     def post(self, request):
-        cashier = get_object_or_404(Cashier, user=request.user, is_active=True)
+        cashier = get_active_cashier_or_404(request.user)
         business = cashier.business
         serializer = DiscountUsageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         customer = None
+        customer_id = serializer.validated_data.get("customer_id")
         customer_email = serializer.validated_data.get("customer_email")
-        if customer_email:
+        if customer_id:
+            # QR skanerlashdan kelgan mijoz ID'si
+            customer = User.objects.filter(pk=customer_id).first()
+            if not customer:
+                return Response(
+                    {"detail": "Mijoz topilmadi."}, status=status.HTTP_404_NOT_FOUND
+                )
+        elif customer_email:
             customer, _ = User.objects.get_or_create(
                 email=customer_email, defaults={"username": customer_email, "role": User.Role.CUSTOMER}
             )
 
-        percent = business.application.discount_percent if business.application else 0
+        application = business.application
+        percent = application.discount_percent if application else 0
         purchase_amount = serializer.validated_data["purchase_amount"]
-        discount_amount = purchase_amount * percent / 100
+
+        # "Minimal xarid summasi" turidagi chegirmada limit tekshiriladi
+        if (
+            application
+            and application.discount_type == Application.DiscountType.MIN_PURCHASE
+            and application.min_purchase_amount
+            and purchase_amount < application.min_purchase_amount
+        ):
+            return Response(
+                {
+                    "detail": (
+                        f"Chegirma faqat {application.min_purchase_amount} so'mdan "
+                        "yuqori xaridlarga qo'llaniladi."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        discount_amount = (purchase_amount * percent / Decimal(100)).quantize(
+            Decimal("0.01")
+        )
 
         usage = DiscountUsage.objects.create(
             business=business,
@@ -167,7 +242,201 @@ class CashierApplyDiscountView(APIView):
             purchase_amount=purchase_amount,
             discount_amount=discount_amount,
         )
+
+        # Biznes egasiga "Yangi mijoz" bildirishnomasi (Bildirishnomalar sahifasi uchun)
+        UserNotification.objects.create(
+            user=business.owner,
+            notification_type=UserNotification.NotificationType.NEW_CUSTOMER,
+            title="Yangi mijoz",
+            body=(
+                f"{cashier.full_name} {percent}% chegirma qo'lladi: "
+                f"{purchase_amount} so'm xarid, {discount_amount} so'm chegirma."
+            ),
+        )
+
         return Response(DiscountUsageSerializer(usage).data, status=status.HTTP_201_CREATED)
+
+
+class CashierMeView(APIView):
+    """Kassir profili: o'z ma'lumotlari va biriktirilgan biznes."""
+
+    permission_classes = [IsAuthenticated, IsCashier]
+
+    def get(self, request):
+        cashier = get_object_or_404(
+            Cashier.objects.select_related(
+                "business", "business__category", "business__application"
+            ),
+            user=request.user,
+        )
+        business = cashier.business
+        return Response(
+            {
+                "id": cashier.id,
+                "full_name": cashier.full_name,
+                "email": request.user.email,
+                "is_active": cashier.is_active,
+                "added_at": cashier.added_at,
+                "business": {
+                    "id": business.id,
+                    "name": business.name,
+                    "category": business.category.name if business.category_id else None,
+                    "phone_number": business.phone_number,
+                    "full_address": business.full_address,
+                    "current_percent": (
+                        business.application.discount_percent
+                        if business.application
+                        else None
+                    ),
+                },
+            }
+        )
+
+
+class CashierDashboardView(APIView):
+    """Kassir dashboard: bugungi tashriflar, chegirma va tushum."""
+
+    permission_classes = [IsAuthenticated, IsCashier]
+
+    def get(self, request):
+        cashier = get_active_cashier_or_404(request.user)
+        business = cashier.business
+        today = timezone.localdate()
+
+        today_usages = DiscountUsage.objects.filter(
+            business=business, used_at__date=today
+        )
+        totals = today_usages.aggregate(
+            discount=Sum("discount_amount"), purchase=Sum("purchase_amount")
+        )
+        discount_total = totals["discount"] or 0
+        purchase_total = totals["purchase"] or 0
+
+        data = {
+            "today_visits": today_usages.count(),
+            "my_today_visits": today_usages.filter(cashier=cashier).count(),
+            "today_discount_amount": discount_total,
+            "today_paid_amount": purchase_total - discount_total,
+            "current_percent": (
+                business.application.discount_percent if business.application else None
+            ),
+        }
+        return Response(CashierDashboardSerializer(data).data)
+
+
+class CashierVisitHistoryView(generics.ListAPIView):
+    """Kassir paneli: Tashriflar tarixi (o'z biznesi bo'yicha).
+
+    ?mine=1 — faqat shu kassir o'zi qo'llagan chegirmalar,
+    ?date_from / ?date_to — sana oralig'i.
+    """
+
+    serializer_class = DiscountUsageSerializer
+    permission_classes = [IsAuthenticated, IsCashier]
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["used_at"]
+    pagination_class = None
+
+    def get_queryset(self):
+        cashier = get_active_cashier_or_404(self.request.user)
+        queryset = DiscountUsage.objects.filter(
+            business=cashier.business
+        ).select_related("customer", "cashier")
+        if self.request.query_params.get("mine") in ("1", "true"):
+            queryset = queryset.filter(cashier=cashier)
+        return filter_by_date_range(queryset, self.request)
+
+
+class CashierScanQrView(APIView):
+    """QR skanerlash: mijoz QR kodi (mijoz ID yoki email) -> mijoz + joriy foiz.
+
+    Kassir mijozning QR kodini skanerlaydi, backend mijozni topib qaytaradi;
+    keyin kassir summa kiritib apply-discount'ga customer_id bilan yuboradi.
+    """
+
+    permission_classes = [IsAuthenticated, IsCashier]
+
+    def post(self, request):
+        cashier = get_active_cashier_or_404(request.user)
+        serializer = QrScanSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        qr_value = serializer.validated_data["value"]
+
+        customer = None
+        try:
+            customer = User.objects.filter(pk=uuid.UUID(qr_value)).first()
+        except ValueError:
+            if "@" in qr_value:
+                customer = User.objects.filter(email__iexact=qr_value).first()
+
+        if not customer:
+            return Response(
+                {"detail": "QR kod bo'yicha mijoz topilmadi."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if customer.is_blocked:
+            return Response(
+                {"detail": "Bu mijoz bloklangan."}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        business = cashier.business
+        percent = (
+            business.application.discount_percent if business.application else 0
+        )
+
+        # Mijozning shu biznesdagi tashriflar tarixi
+        usages = DiscountUsage.objects.filter(business=business, customer=customer)
+        visits_count = usages.count()
+        last_usage = usages.order_by("-used_at").first()
+        if last_usage:
+            days_ago = (timezone.localdate() - last_usage.used_at.date()).days
+            last_visit_label = "Bugun" if days_ago == 0 else f"{days_ago} kun oldin"
+        else:
+            days_ago = None
+            last_visit_label = "Birinchi tashrif"
+
+        membership = getattr(customer, "membership", None)
+        is_member_active = bool(membership and membership.status == "active")
+        membership_type = "Savin a'zo" if is_member_active else "Oddiy mijoz"
+        membership_status = (
+            membership.get_status_display() if membership else "A'zolik yo'q"
+        )
+
+        full_name = (
+            customer.get_full_name()
+            or customer.username
+            or customer.email.split("@")[0]
+        )
+        code = f"#{customer.id.hex[:8].upper()}"
+
+        # Frontend'ning QR wizard'i kutadigan barcha maydonlar (StepMijoz,
+        # StepTasdiqlash, StepMuvaffaqiyat komponentlari bilan mos).
+        return Response(
+            {
+                "id": customer.id,
+                "full_name": full_name,
+                "email": customer.email,
+                "phone_number": customer.phone_number,
+                "membership_type": membership_type,
+                "membership_status": membership_status,
+                "status": membership_status,
+                "code": code,
+                "member_id": code,
+                "visits_count": visits_count,
+                "total_visits": visits_count,
+                "last_visit_days_ago": days_ago,
+                "last_visit_label": last_visit_label,
+                "discount_percent": percent,
+                # eski format bilan moslik uchun
+                "customer": {
+                    "id": customer.id,
+                    "username": customer.username,
+                    "email": customer.email,
+                    "phone_number": customer.phone_number,
+                },
+                "current_percent": percent,
+            }
+        )
 
 
 # ==================== ADMIN: Foiz o'zgartirish so'rovlarini boshqarish ====================
@@ -200,8 +469,27 @@ class AdminDiscountChangeReviewView(APIView):
             if business.application:
                 business.application.discount_percent = change_request.new_percent
                 business.application.save(update_fields=["discount_percent"])
+            notif_title = "Chegirma so'rovi tasdiqlandi"
+            notif_body = (
+                f"Chegirma foizi {change_request.old_percent}% dan "
+                f"{change_request.new_percent}% ga o'zgartirildi."
+            )
         else:
             change_request.status = DiscountChangeRequest.Status.REJECTED
+            notif_title = "Chegirma so'rovi rad etildi"
+            notif_body = (
+                f"{change_request.new_percent}% chegirma so'rovingiz admin "
+                "tomonidan rad etildi."
+            )
 
         change_request.save()
+
+        # So'rov natijasi haqida biznes egasiga bildirishnoma
+        UserNotification.objects.create(
+            user=change_request.requested_by,
+            notification_type=UserNotification.NotificationType.DISCOUNT,
+            title=notif_title,
+            body=notif_body,
+        )
+
         return Response(DiscountChangeRequestSerializer(change_request).data)

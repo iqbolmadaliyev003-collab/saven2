@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from discounts.models import DiscountChangeRequest, DiscountUsage
@@ -42,8 +44,12 @@ class DiscountUsageSerializer(serializers.ModelSerializer):
 class DiscountUsageCreateSerializer(serializers.Serializer):
     """Kassir tomonidan chegirma qo'llash (mijoz keldi -> chegirma berildi)."""
 
+    # QR skanerlashdan keladigan mijoz ID'si (ustuvor) yoki qo'lda kiritilgan email
+    customer_id = serializers.UUIDField(required=False)
     customer_email = serializers.EmailField(required=False, allow_blank=True)
-    purchase_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    purchase_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0.01")
+    )
 
 
 class DiscountStatSerializer(serializers.Serializer):
@@ -52,3 +58,36 @@ class DiscountStatSerializer(serializers.Serializer):
     period = serializers.CharField()
     total_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     total_transactions = serializers.IntegerField()
+
+
+# ---------------- KASSIR PANELI ----------------
+
+
+class QrScanSerializer(serializers.Serializer):
+    """QR skanerlash: mijoz QR kodidan o'qilgan qiymat (mijoz ID yoki email).
+
+    Frontend `qr_code` nomi bilan yuboradi, eski mijozlar `qr_data` bilan —
+    ikkalasi ham qabul qilinadi.
+    """
+
+    qr_data = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    qr_code = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        value = (attrs.get("qr_data") or attrs.get("qr_code") or "").strip()
+        if not value:
+            raise serializers.ValidationError(
+                {"qr_code": "QR kod qiymati yuborilmadi."}
+            )
+        attrs["value"] = value
+        return attrs
+
+
+class CashierDashboardSerializer(serializers.Serializer):
+    """Kassir dashboard: bugungi tashriflar va summalar."""
+
+    today_visits = serializers.IntegerField()
+    my_today_visits = serializers.IntegerField()
+    today_discount_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    today_paid_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    current_percent = serializers.IntegerField(allow_null=True)
