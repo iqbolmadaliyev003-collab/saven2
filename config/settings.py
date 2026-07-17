@@ -6,6 +6,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ✅ FIX: SECRET_KEY/DEBUG/ALLOWED_HOSTS/CORS avval doim hardcode va
@@ -51,6 +53,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Whitenoise — Render'da statik fayllarni (admin CSS va h.k.) gunicorn
+    # orqali to'g'ridan-to'g'ri xizmat qilish uchun
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -80,11 +85,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
+# Lokal dev: SQLite (avvalgidek). Render/production: DATABASE_URL env
+# o'rnatilsa (masalan Render Postgres) o'sha ishlatiladi.
+# MUHIM: Render'da SQLite ishlatib bo'lmaydi — har deploy'da disk tozalanadi
+# va barcha ma'lumotlar yo'qoladi ("ma'lumotlar yuklanmayapti" sabablaridan biri).
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=600,
+    )
 }
 
 AUTH_USER_MODEL = 'users.User'
@@ -103,6 +112,12 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Whitenoise: siqilgan va keshlanadigan statik fayllar (production uchun)
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -142,3 +157,13 @@ CORS_ALLOWED_ORIGINS = [
 # istalgan sayt API'ga so'rov yubora olardi). Endi faqat DEBUG=True
 # bo'lganda (lokal dev) barcha originlarga ruxsat beriladi.
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+
+# HTTPS orqasidagi admin/login formalar uchun (Render domeni misol:
+# CSRF_TRUSTED_ORIGINS=https://saven-backend.onrender.com)
+CSRF_TRUSTED_ORIGINS = [
+    o for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o
+]
+
+# Render (va boshqa PaaS'lar) so'rovni proxy orqali uzatadi — HTTPS ekanini
+# shu header orqali bildiradi.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

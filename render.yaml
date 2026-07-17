@@ -1,0 +1,39 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Render dashboardida "New +" -> "Blueprint" -> shu repo'ni tanlang.
+# Yoki qo'lda "Web Service" yaratayotgan bo'lsangiz quyidagilarni kiriting:
+#   Runtime:        Python
+#   Build Command:  ./build.sh
+#   Start Command:  gunicorn config.wsgi:application
+# va pastdagi envVars'larni Environment bo'limiga qo'shing.
+
+databases:
+  - name: saven-db
+    plan: free
+
+services:
+  - type: web
+    name: saven-backend
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn config.wsgi:application"
+    healthCheckPath: /api/v1/health/
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saven-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      # Frontend alohida domenda tursa, uning to'liq manzilini kiriting,
+      # masalan: https://saven-web.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
