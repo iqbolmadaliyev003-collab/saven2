@@ -92,10 +92,20 @@ class ApplicationStep2Serializer(serializers.ModelSerializer):
 class ApplicationStep3Serializer(serializers.ModelSerializer):
     """
     Step 3 — Joylashuv.
-    NOTE: latitude/longitude ariza beruvchi tomonidan kiritilmaydi — "Aniq lokatsiyani
-    operator siz bilan birga belgilaydi" (rasmdagi eslatma). Shuning uchun bu maydonlar
-    bu yerda yo'q; ular admin tomonidan alohida endpoint orqali belgilanadi.
+    latitude/longitude ariza beruvchi tomonidan xaritadan belgilangan boshlang'ich
+    nuqta sifatida ixtiyoriy yuboriladi (majburiy emas) — operator ariza ko'rib
+    chiqishda buni AdminApplicationSetLocationView orqali aniqlashtirishi/
+    o'zgartirishi mumkin.
     """
+
+    latitude = serializers.DecimalField(
+        max_digits=10, decimal_places=7, required=False, allow_null=True,
+        min_value=-90, max_value=90,
+    )
+    longitude = serializers.DecimalField(
+        max_digits=10, decimal_places=7, required=False, allow_null=True,
+        min_value=-180, max_value=180,
+    )
 
     class Meta:
         model = Application
@@ -106,6 +116,8 @@ class ApplicationStep3Serializer(serializers.ModelSerializer):
             "work_days",
             "work_hours_from",
             "work_hours_to",
+            "latitude",
+            "longitude",
         ]
 
     def update(self, instance, validated_data):
