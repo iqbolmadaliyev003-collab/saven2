@@ -5,6 +5,10 @@ from discounts.views import (
     AdminDiscountChangeRequestViewSet,
     AdminDiscountChangeReviewView,
     CashierApplyDiscountView,
+    CashierDashboardView,
+    CashierMeView,
+    CashierScanQrView,
+    CashierVisitHistoryView,
     DiscountChangeRequestCreateView,
     DiscountHistoryExportView,
     DiscountHistoryView,
@@ -22,6 +26,11 @@ urlpatterns = [
     path("my-business/discount/history/export/", DiscountHistoryExportView.as_view(), name="discount-history-export"),
     path("my-business/discount/statistics/", DiscountStatisticsView.as_view(), name="discount-statistics"),
 
+    # ---- Kassir paneli ----
+    path("cashier/me/", CashierMeView.as_view(), name="cashier-me"),
+    path("cashier/dashboard/", CashierDashboardView.as_view(), name="cashier-dashboard"),
+    path("cashier/visits/", CashierVisitHistoryView.as_view(), name="cashier-visits"),
+    path("cashier/scan-qr/", CashierScanQrView.as_view(), name="cashier-scan-qr"),
     path("cashier/apply-discount/", CashierApplyDiscountView.as_view(), name="cashier-apply-discount"),
 
     path("admin/discount-requests/<uuid:pk>/review/", AdminDiscountChangeReviewView.as_view(), name="admin-discount-review"),

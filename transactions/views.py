@@ -60,14 +60,16 @@ class TransactionViewSet(viewsets.ModelViewSet):
         """Foydalanuvchining biznesiga tegishli tranzaksiyalar"""
         user = self.request.user
         
+        base = Transaction.objects.select_related("cashier__cashier_profile")
+
         if user.role == 'admin' or user.role == 'superadmin':
             # Adminlar barchani ko'radi
-            queryset = Transaction.objects.all()
+            queryset = base
         elif user.role in ('business_owner', 'cashier'):
             # Biznes egasi/kassir faqat o'z biznesiga tegishlisini ko'radi
             business = get_user_business(user)
             queryset = (
-                Transaction.objects.filter(business=business)
+                base.filter(business=business)
                 if business
                 else Transaction.objects.none()
             )

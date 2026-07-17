@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from businesses.models import Application, Business, Cashier, Category
+from businesses.models import Application, Business, Cashier, Category, Service
 from users.models import User
 
 
@@ -178,11 +178,29 @@ class ApplicationReviewSerializer(serializers.Serializer):
 # ---------------- BIZNES (faol listing) ----------------
 
 
+class ServiceSerializer(serializers.ModelSerializer):
+    """Biznes xizmatlari (kassir tranzaksiyada tanlaydigan katalog)."""
+
+    class Meta:
+        model = Service
+        fields = ["id", "name", "price", "is_active", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Narx 0 dan katta bo'lishi kerak.")
+        return value
+
+
 class CashierSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source="user.email", read_only=True)
+
     class Meta:
         model = Cashier
-        fields = ["id", "business", "user", "full_name", "is_active", "added_at"]
-        read_only_fields = ["id", "added_at", "business"]
+        fields = ["id", "business", "user", "email", "full_name", "is_active", "added_at"]
+        # `user` yozib bo'lmaydigan bo'lishi shart — aks holda PATCH orqali
+        # kassirni boshqa foydalanuvchi hisobiga bog'lab qo'yish mumkin edi.
+        read_only_fields = ["id", "added_at", "business", "user"]
 
 
 class CashierCreateSerializer(serializers.Serializer):

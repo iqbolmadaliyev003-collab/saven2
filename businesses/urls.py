@@ -11,12 +11,15 @@ from businesses.views import (
     ApplicationDetailView,
     ApplicationWizardStep1View,
     ApplicationWizardStepUpdateView,
+    CashierServiceListView,
     CategoryViewSet,
     MyApplicationsView,
     MyBusinessDashboardView,
     MyBusinessView,
     MyCashierDetailView,
     MyCashierListCreateView,
+    MyServiceDetailView,
+    MyServiceListCreateView,
 )
 
 router = DefaultRouter()
@@ -42,4 +45,9 @@ urlpatterns = [
     path("my-business/dashboard/", MyBusinessDashboardView.as_view(), name="my-business-dashboard"),
     path("my-business/cashiers/", MyCashierListCreateView.as_view(), name="my-cashiers"),
     path("my-business/cashiers/<uuid:pk>/", MyCashierDetailView.as_view(), name="my-cashier-detail"),
+
+    # ---- Xizmatlar katalogi ----
+    path("my-business/services/", MyServiceListCreateView.as_view(), name="my-services"),
+    path("my-business/services/<uuid:pk>/", MyServiceDetailView.as_view(), name="my-service-detail"),
+    path("cashier/services/", CashierServiceListView.as_view(), name="cashier-services"),
 ] + router.urls

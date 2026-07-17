@@ -27,6 +27,8 @@ class MyNotificationsView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["is_read", "notification_type"]
+    # Frontend to'liq ro'yxatni oladi va o'zi ko'rsatadi (sahifalash tugmasi yo'q)
+    pagination_class = None
 
     def get_queryset(self):
         return UserNotification.objects.filter(user=self.request.user)

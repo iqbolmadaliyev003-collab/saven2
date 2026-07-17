@@ -20,13 +20,25 @@ class TransactionLogSerializer(serializers.ModelSerializer):
         read_only_fields = ['timestamp']
 
 
+def resolve_cashier_name(user):
+    """✅ FIX: kassirning haqiqiy ismi `Cashier.full_name` maydonida saqlanadi,
+    avvalgi `cashier.get_full_name` esa User'ning bo'sh first/last_name'iga
+    qaragani uchun doim "" qaytarardi (frontend jadvalida kassir ko'rinmasdi)."""
+    if not user:
+        return ""
+    profile = getattr(user, "cashier_profile", None)
+    if profile and profile.full_name:
+        return profile.full_name
+    return user.get_full_name() or user.username
+
+
 class TransactionListSerializer(serializers.ModelSerializer):
     """Tranzaksiya ro'yxati uchun (jadval ko'rsatish)"""
-    cashier_name = serializers.CharField(
-        source='cashier.get_full_name', 
-        read_only=True
-    )
-    
+    cashier_name = serializers.SerializerMethodField()
+
+    def get_cashier_name(self, obj):
+        return resolve_cashier_name(obj.cashier)
+
     class Meta:
         model = Transaction
         fields = [
@@ -156,14 +168,14 @@ class TransactionSummarySerializer(serializers.Serializer):
 
 class TransactionExportSerializer(serializers.ModelSerializer):
     """CSV export uchun"""
-    cashier_name = serializers.CharField(
-        source='cashier.get_full_name', 
-        read_only=True
-    )
+    cashier_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(
-        source='get_status_display', 
+        source='get_status_display',
         read_only=True
     )
+
+    def get_cashier_name(self, obj):
+        return resolve_cashier_name(obj.cashier)
     
     class Meta:
         model = Transaction

@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from businesses.models import Application, Business, Cashier, Category
+from businesses.models import Application, Business, Cashier, Category, Service
 from businesses.serializers import (
     ApplicationLocationSetSerializer,
     ApplicationReviewSerializer,
@@ -22,10 +22,11 @@ from businesses.serializers import (
     CashierSerializer,
     CategorySerializer,
     PartnershipStatusUpdateSerializer,
+    ServiceSerializer,
 )
 from discounts.models import DiscountUsage
 from users.models import User
-from users.permissions import IsAdminRole, IsBusinessOwner
+from users.permissions import IsAdminRole, IsBusinessOwner, IsCashier
 
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
@@ -261,14 +262,18 @@ class MyBusinessDashboardView(APIView):
         today_usages = DiscountUsage.objects.filter(
             business=business, used_at__date=today
         )
+        totals = today_usages.aggregate(
+            discount=Sum("discount_amount"), purchase=Sum("purchase_amount")
+        )
+        discount_total = totals["discount"] or 0
+        purchase_total = totals["purchase"] or 0
 
         data = {
             "today_customers": today_usages.values("customer").distinct().count(),
-            "today_discount_amount": today_usages.aggregate(s=Sum("discount_amount"))[
-                "s"
-            ]
-            or 0,
-            "today_revenue": today_usages.aggregate(s=Sum("purchase_amount"))["s"] or 0,
+            "today_discount_amount": discount_total,
+            # Daromad — mijozlar amalda to'lagan summa (xarid - chegirma).
+            # Statistika sahifasidagi hisob-kitob bilan bir xil bo'lishi uchun.
+            "today_revenue": purchase_total - discount_total,
             "total_customers": DiscountUsage.objects.filter(business=business)
             .values("customer")
             .distinct()
@@ -281,15 +286,56 @@ class MyBusinessDashboardView(APIView):
         return Response(serializer.data)
 
 
+class MyServiceListCreateView(generics.ListCreateAPIView):
+    """Xizmatlar katalogi: ro'yxat / yangi xizmat qo'shish (biznes egasi)."""
+
+    serializer_class = ServiceSerializer
+    permission_classes = [IsAuthenticated, IsBusinessOwner]
+    pagination_class = None
+
+    def get_queryset(self):
+        business = get_object_or_404(Business, owner=self.request.user)
+        return Service.objects.filter(business=business)
+
+    def perform_create(self, serializer):
+        business = get_object_or_404(Business, owner=self.request.user)
+        serializer.save(business=business)
+
+
+class MyServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Xizmatni tahrirlash / o'chirish (biznes egasi)."""
+
+    serializer_class = ServiceSerializer
+    permission_classes = [IsAuthenticated, IsBusinessOwner]
+
+    def get_queryset(self):
+        business = get_object_or_404(Business, owner=self.request.user)
+        return Service.objects.filter(business=business)
+
+
+class CashierServiceListView(generics.ListAPIView):
+    """Kassir uchun: o'z biznesining faol xizmatlar ro'yxati (tranzaksiyada tanlash)."""
+
+    serializer_class = ServiceSerializer
+    permission_classes = [IsAuthenticated, IsCashier]
+    pagination_class = None
+
+    def get_queryset(self):
+        cashier = get_object_or_404(Cashier, user=self.request.user, is_active=True)
+        return Service.objects.filter(business=cashier.business, is_active=True)
+
+
 class MyCashierListCreateView(generics.ListCreateAPIView):
     """Kassirlar: Ro'yxat ko'rish / Kassir qo'shish (Email, parol berish)."""
 
     serializer_class = CashierSerializer
     permission_classes = [IsAuthenticated, IsBusinessOwner]
+    # Frontend to'liq ro'yxat kutadi (o'zi sahifalamaydi)
+    pagination_class = None
 
     def get_queryset(self):
         business = get_object_or_404(Business, owner=self.request.user)
-        return Cashier.objects.filter(business=business)
+        return Cashier.objects.filter(business=business).select_related("user")
 
     def create(self, request, *args, **kwargs):
         business = get_object_or_404(Business, owner=request.user)
@@ -316,4 +362,20 @@ class MyCashierDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         business = get_object_or_404(Business, owner=self.request.user)
-        return Cashier.objects.filter(business=business)
+        return Cashier.objects.filter(business=business).select_related("user")
+
+    def perform_update(self, serializer):
+        cashier = serializer.save()
+        # Kassir faolsizlantirilsa login ham bloklanadi (qayta yoqilsa — ochiladi),
+        # aks holda o'chirilgan kassir tizimga kiraverar edi.
+        if cashier.user.is_active != cashier.is_active:
+            cashier.user.is_active = cashier.is_active
+            cashier.user.save(update_fields=["is_active"])
+
+    def perform_destroy(self, instance):
+        user = instance.user
+        instance.delete()
+        # Kassir o'chirilganda unga berilgan login hisobi ham yopiladi —
+        # aks holda "yetim" hisob tizimga kiraverar edi.
+        user.is_active = False
+        user.save(update_fields=["is_active"])
